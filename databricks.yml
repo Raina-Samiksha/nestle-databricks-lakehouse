@@ -1,0 +1,169 @@
+# =============================================================================
+# File: databricks.yml
+# Purpose: Databricks Asset Bundle (DAB) - Infrastructure as Code
+# Pattern: SCJ Databricks Lakehouse - Deployment Manifest
+# Description: Defines all jobs, notebooks, and resources for deployment
+# =============================================================================
+
+bundle:
+  name: nestle-databricks-lakehouse
+  target: dev
+
+# =============================================================================
+# RESOURCES
+# =============================================================================
+
+resources:
+
+  # =========================================================================
+  # JOBS
+  # =========================================================================
+
+  jobs:
+
+    # -----------------------------------------------------------------------
+    # JOB 1: Bronze Ingestion & DQ (existing, shown for context)
+    # -----------------------------------------------------------------------
+    
+    ingest_and_validate_sharepoint_regional_targets:
+      name: ingest_and_validate_sharepoint_regional_targets
+      description: "Bronze layer: ingest SharePoint regional targets, run DQ checks"
+      job_cluster_key: default_cluster
+      tasks:
+        - task_key: run_bronze_ingestion
+          notebook_task:
+            notebook_path: src/ingestion_framework_scripts/03_nb_bronze_ingestion_scj
+            base_parameters:
+              source_id: sharepoint_regional_targets
+          timeout_seconds: 3600
+
+        - task_key: run_dq_validation
+          notebook_task:
+            notebook_path: src/data_quality_framework/04_nb_data_quality_validation
+            base_parameters:
+              source_id: sharepoint_regional_targets
+          timeout_seconds: 1800
+          depends_on:
+            - task_key: run_bronze_ingestion
+
+    # -----------------------------------------------------------------------
+    # JOB 2: Silver SCD2 Transformation (NEW)
+    # -----------------------------------------------------------------------
+    
+    silver_scd2_regional_sales_targets:
+      name: silver_scd2_regional_sales_targets
+      description: "Silver layer: SCD2 Type 2 transformation for regional sales targets"
+      job_cluster_key: default_cluster
+      
+      # This job depends on the Bronze ingestion job
+      # It will only run AFTER the Bronze job succeeds
+      depends_on:
+        - job_key: ingest_and_validate_sharepoint_regional_targets
+      
+      tasks:
+        - task_key: scd2_expire_and_insert
+          notebook_task:
+            notebook_path: src/silver/05_nb_silver_scd2_regional_sales_targets_scj
+            # No widget parameters needed - the notebook is self-contained
+          timeout_seconds: 600
+      
+      # Schedule: Run daily at 6:00 AM UTC (after Bronze completes)
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?" # Daily at 06:00 UTC
+        timezone_id: UTC
+        pause_status: UNPAUSED
+
+  # =========================================================================
+  # JOB CLUSTERS
+  # =========================================================================
+
+  job_clusters:
+    - job_cluster_key: default_cluster
+      new_cluster:
+        spark_version: "14.3.x-scala2.12"
+        node_type_id: "i3.xlarge"
+        num_workers: 1
+        aws_attributes:
+          availability: ANY
+          zone_id: "us-west-2a"
+        spark_conf:
+          "spark.sql.adaptive.enabled": "true"
+
+# =============================================================================
+# TARGETS (Environment Overrides)
+# =============================================================================
+
+targets:
+
+  # -----------------------------------------------------------------------
+  # DEV Environment
+  # -----------------------------------------------------------------------
+  dev:
+    workspace:
+      host: https://frac-dbpr1.cloud.databricks.com
+      token: ${var.databricks_token}
+    variables:
+      env: dev
+      catalog: nestle_dev
+      warehouse_id: ${var.dev_warehouse_id}
+
+  # -----------------------------------------------------------------------
+  # TEST Environment
+  # -----------------------------------------------------------------------
+  test:
+    workspace:
+      host: https://frac-dbpr1.cloud.databricks.com
+      token: ${var.databricks_token}
+    variables:
+      env: test
+      catalog: nestle_test
+      warehouse_id: ${var.test_warehouse_id}
+
+  # -----------------------------------------------------------------------
+  # PROD Environment
+  # -----------------------------------------------------------------------
+  prod:
+    workspace:
+      host: https://frac-dbpr1.cloud.databricks.com
+      token: ${var.databricks_token}
+    variables:
+      env: prod
+      catalog: nestle_prod
+      warehouse_id: ${var.prod_warehouse_id}
+
+# =============================================================================
+# VARIABLES (Environment-specific values)
+# =============================================================================
+
+variables:
+  databricks_token:
+    description: "Databricks API token for authentication"
+    default: ""
+  
+  dev_warehouse_id:
+    description: "SQL Warehouse ID for DEV environment"
+    default: ""
+  
+  test_warehouse_id:
+    description: "SQL Warehouse ID for TEST environment"
+    default: ""
+  
+  prod_warehouse_id:
+    description: "SQL Warehouse ID for PROD environment"
+    default: ""
+
+# =============================================================================
+# DEPLOYMENT NOTES
+# =============================================================================
+
+# Deploy with:
+#   databricks bundle deploy --target dev
+#   databricks bundle deploy --target test
+#   databricks bundle deploy --target prod
+#
+# Run jobs with:
+#   databricks bundle run ingest_and_validate_sharepoint_regional_targets --target dev
+#   databricks bundle run silver_scd2_regional_sales_targets --target dev
+#
+# For more info:
+#   https://docs.databricks.com/en/dev-tools/bundles/index.html
