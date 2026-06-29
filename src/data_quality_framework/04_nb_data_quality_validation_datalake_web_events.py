@@ -199,3 +199,4 @@ spark.sql(f"""
 # MAGIC SELECT source_id, check_type, check_status, check_details
 # MAGIC FROM nestle_dev_silver.control.dq_results
 # MAGIC ORDER BY source_id, check_type;
+
