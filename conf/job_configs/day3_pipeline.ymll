@@ -1,0 +1,45 @@
+name: nestle_day3_sql_server_pipeline
+description: Day 3 - SQL Server incremental processing with watermark
+
+tasks:
+  - task_key: bronze_load_day3
+    notebook_path: /src/ingestion_framework_scripts/16_nb_load_day3_incremental
+    timeout_seconds: 900
+    parameters:
+      source_id: "sql_sales_transactions"
+      day: "3"
+    
+  - task_key: dq_validation_day3
+    notebook_path: /src/data_quality_framework/17_nb_dq_validation_day3
+    depends_on:
+      - task_key: bronze_load_day3
+    timeout_seconds: 600
+    
+  - task_key: watermark_update_day3
+    notebook_path: /src/control_table_scripts/18_nb_update_watermark_day3
+    depends_on:
+      - task_key: dq_validation_day3
+    timeout_seconds: 300
+    
+  - task_key: silver_scd2_day3
+    notebook_path: /src/silver/19_nb_silver_scd2_day3_incremental
+    depends_on:
+      - task_key: watermark_update_day3
+    timeout_seconds: 900
+    
+  - task_key: gold_refresh_day3
+    notebook_path: /src/gold/20_nb_gold_day3_refresh
+    depends_on:
+      - task_key: silver_scd2_day3
+    timeout_seconds: 900
+
+schedule:
+  quartz_cron_expression: "0 4 * * ?"
+  timezone_id: "UTC"
+
+timeout_seconds: 5400
+max_retries: 1
+
+notification_settings:
+  email_notifications:
+    on_failure: ["raina.samiksha@nestle.com"]
