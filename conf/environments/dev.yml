@@ -1,0 +1,29 @@
+# Development Environment Configuration
+environment: dev
+catalog: nestle_dev
+schema_bronze: bronze
+schema_silver: silver
+schema_gold: gold
+schedule_timezone: UTC
+
+jobs:
+  bronze_ingestion:
+    schedule: "0 2 * * *"  # 2 AM UTC daily
+  silver_transform:
+    schedule: "0 3 * * *"  # 3 AM UTC daily
+  gold_refresh:
+    schedule: "0 4 * * *"  # 4 AM UTC daily
+
+# Cluster configuration
+cluster:
+  num_workers: 2
+  worker_type: i3.xlarge
+  driver_type: i3.xlarge
+
+# Notifications
+notifications:
+  email: raina.dev@nestle.com
+  slack_channel: "#dev-lakehouse"
+
+# Retention
+retention_days: 30

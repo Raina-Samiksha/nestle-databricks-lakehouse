@@ -1,0 +1,151 @@
+# =============================================================================
+# File: conf/silver/silver_scd2_regional_sales_targets.yml
+# Purpose: Configuration for SCD Type 2 transformation
+# Source: nestle_dev_bronze.sharepoint.regional_sales_targets
+# Target: nestle_dev_silver.core.regional_sales_targets_scd2
+# Pattern: SCJ Databricks Lakehouse - Silver Layer
+# =============================================================================
+
+transformation:
+  name: regional_sales_targets_scd2
+  description: "Slowly Changing Dimension Type 2 for regional sales targets with full history tracking"
+  owner: "Data Engineering"
+  version: "1.0"
+  created_date: "2026-06-26"
+  
+  # Source configuration
+  source:
+    catalog: nestle_dev
+    schema: bronze
+    table: sharepoint.regional_sales_targets
+    connection_type: unity_catalog
+    full_table_path: "nestle_dev_bronze.sharepoint.regional_sales_targets"
+    
+  # Target configuration
+  target:
+    catalog: nestle_dev
+    schema: silver
+    schema_subfolder: core
+    table: regional_sales_targets_scd2
+    table_type: managed
+    full_table_path: "nestle_dev_silver.core.regional_sales_targets_scd2"
+    
+  # Business key - identifies "same row" across time
+  business_key:
+    - product_id
+    - region
+    - period
+    description: "Combined natural key uniquely identifying a target record"
+    
+  # Columns to track for changes (SCD2)
+  change_tracking:
+    compare_columns:
+      - target_amount
+    description: "Any change in target_amount triggers SCD2 expire-and-insert"
+    
+  # SCD2 metadata columns
+  scd2_columns:
+    valid_from: dbt_valid_from
+    valid_to: dbt_valid_to
+    is_current: dbt_is_current
+    description: "Standard dbt SCD2 tracking columns"
+    
+  # Column transformations
+  transformations:
+    target_category:
+      logic: "CASE WHEN target_amount < 5000 THEN 'Low' WHEN target_amount < 10000 THEN 'Medium' ELSE 'High' END"
+      description: "Categorize target into Low/Medium/High bands"
+      
+  # Implementation notebook
+  implementation:
+    notebook_path: "src/silver/05_nb_silver_scd2_regional_sales_targets_scj"
+    notebook_language: sql
+    execution_timeout_minutes: 10
+    
+  # Orchestration
+  orchestration:
+    job_name: "silver_scd2_regional_sales_targets"
+    depends_on_job: "ingest_and_validate_sharepoint_regional_targets"
+    depends_on_table: "nestle_dev_bronze.sharepoint.regional_sales_targets"
+    schedule:
+      frequency: daily
+      time: "06:00 UTC"
+      timezone: "UTC"
+    
+  # Audit trail
+  audit:
+    audit_table: "nestle_dev_silver.control.ingestion_audit_log"
+    record_load_type: "scd2"
+    track_rows_read: true
+    track_rows_written: true
+    track_timestamp: true
+    
+  # Quality checks
+  quality:
+    enable_dq_checks: true
+    dq_config_source: "nestle_dev_silver.control.dq_config"
+    checks:
+      - row_count
+      - pk_not_null
+      - duplicate_pk
+      - not_null
+      
+  # Documentation
+  documentation:
+    description_long: |
+      Implements Slowly Changing Dimension Type 2 for regional sales targets.
+      
+      Logic:
+      1. Identify rows in Silver that are current (is_current=TRUE) but whose
+         business key matches a Bronze row with a DIFFERENT target_amount
+      2. Mark those Silver rows as expired (is_current=FALSE, valid_to=today)
+      3. Insert new current rows for all Bronze records that need updating or are new
+      4. Result: full historical record with ability to report "what was the target on date X?"
+      
+      Example: When P001/Asia/2026-Q2 changes from 14065.89 → 18988.95 → 22000:
+      - First load: one row, 14065.89, is_current=TRUE
+      - Second load: original row marked expired, new row 18988.95 inserted
+      - Third load: second row marked expired, new row 22000 inserted
+      - Query result: three rows showing complete history
+      
+    use_cases:
+      - Historical analysis of target changes
+      - Audit trail of business changes
+      - Point-in-time reporting
+      - Change impact analysis
+      
+  # Lineage
+  lineage:
+    upstream_tables:
+      - nestle_dev_bronze.sharepoint.regional_sales_targets
+    downstream_tables:
+      - nestle_dev_silver.core.regional_sales_targets_scd2
+      - nestle_dev_silver.control.ingestion_audit_log
+      
+  # Testing & validation
+  testing:
+    test_coverage:
+      - "Verify SCD2 expire step marks old rows as expired"
+      - "Verify SCD2 insert step creates new current rows"
+      - "Verify no duplicate keys exist for same is_current state"
+      - "Verify audit log captures load correctly"
+      
+  # Environment overrides
+  environments:
+    dev:
+      source_table: "nestle_dev_bronze.sharepoint.regional_sales_targets"
+      target_table: "nestle_dev_silver.core.regional_sales_targets_scd2"
+      schedule_enabled: false
+      
+    test:
+      source_table: "nestle_test_bronze.sharepoint.regional_sales_targets"
+      target_table: "nestle_test_silver.core.regional_sales_targets_scd2"
+      schedule_enabled: false
+      
+    prod:
+      source_table: "nestle_prod_bronze.sharepoint.regional_sales_targets"
+      target_table: "nestle_prod_silver.core.regional_sales_targets_scd2"
+      schedule_enabled: true
+      schedule:
+        frequency: daily
+        time: "06:00 UTC"
